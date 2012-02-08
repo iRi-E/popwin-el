@@ -432,11 +432,27 @@ popup buffer.")
       (popwin:close-popup-window-if-necessary)
     (error (message "popwin:close-popup-window-timer: error: %s" var))))
 
+(define-minor-mode popwin:minor-mode
+  "Toggle popwin:minor-mode.
+With optional argument ARG, turn winable-mode on if ARG is
+positive, otherwise turn it off.
+
+This minor mode is used internally to allow us to close the popup
+window of popwin by C-g."
+  nil
+  " popwin"
+  (let ((map (make-sparse-keymap)))
+    (define-key map "\C-g" 'popwin:close-popup-window)
+    map)
+  :group 'popwin
+  :global nil)
+
 (defun popwin:close-popup-window (&optional keep-selected)
   "Close the popup window and restore to the previous window
 configuration. If KEEP-SELECTED is non-nil, the lastly selected
 window will not be selected."
   (interactive)
+  (popwin:minor-mode 0)
   (when popwin:popup-window
     (unwind-protect
         (progn
@@ -454,7 +470,6 @@ window will not be selected."
   "Close the popup window if necessary. The all situations where
 the popup window will be closed are followings:
 
-* `C-g' has been pressed.
 * The popup buffer has been killed.
 * The popup buffer has been buried.
 * The popup buffer has been changed if the popup window is
@@ -470,10 +485,6 @@ the popup window will be closed are followings:
             (and minibuf-window-p
                  (minibuffer-prompt)
                  t))
-           (quit-requested
-            (and (eq last-command 'keyboard-quit)
-                 (eq last-command-event ?\C-g)))
-           (orig-this-command this-command)
            (popup-buffer-alive
             (buffer-live-p popwin:popup-buffer))
            (popup-buffer-buried
@@ -486,18 +497,13 @@ the popup window will be closed are followings:
            (other-window-selected
             (and (not (eq window popwin:focus-window))
                  (not (eq window popwin:popup-window)))))
-      (when (or quit-requested
-                (not popup-buffer-alive)
+      (when (or (not popup-buffer-alive)
                 popup-buffer-buried
                 popup-buffer-changed-despite-of-dedicated
                 (not popup-window-alive)
                 (and other-window-selected
                      (not minibuf-window-p)
                      (not popwin:popup-window-stuck-p)))
-        (when (and quit-requested
-                   (null orig-this-command))
-          (setq this-command 'popwin:close-popup-window)
-          (run-hooks 'pre-command-hook))
         (if reading-from-minibuf
             (progn
               (popwin:close-popup-window)
@@ -508,10 +514,7 @@ the popup window will be closed are followings:
                      (not popup-buffer-buried))))
           (when popup-buffer-changed-despite-of-dedicated
             (popwin:switch-to-buffer window-buffer)
-            (goto-char window-point)))
-        (when (and quit-requested
-                   (null orig-this-command))
-          (run-hooks 'post-command-hook))))))
+            (goto-char window-point)))))))
 
 (defun* popwin:popup-buffer (buffer
                              &key
@@ -546,7 +549,9 @@ BUFFER."
                 popwin:window-outline win-outline
                 popwin:selected-window (selected-window))
           (popwin:update-window-references-in-context-stack win-map)
-          (popwin:start-close-popup-window-timer)))
+          (popwin:start-close-popup-window-timer)
+          (with-current-buffer buffer
+            (popwin:minor-mode 1))))
       (with-selected-window popwin:popup-window
         (popwin:switch-to-buffer buffer))
       (setq popwin:popup-buffer buffer
